@@ -1,3 +1,5 @@
+from gaze_zones import MIN_EYE_CONTRIBUTION_RATIO
+
 DEFAULT_STABILITY_FRAMES = 5
 GAZE_EMA_ALPHA = 0.4
 
@@ -20,7 +22,7 @@ class ObservationEngine:
         self.confirmed_zone = "FORWARD"
         self._smoothed_gaze = None
 
-    def estimate_zone(self, head_pose, gaze_x=None, gaze_y=None):
+    def estimate_zone(self, head_pose, gaze_x=None, gaze_y=None, norm_x=None, norm_y=None):
         gaze_zone = self.classifier.classify(gaze_x, gaze_y)
 
         if head_pose == "FORWARD":
@@ -30,14 +32,17 @@ class ObservationEngine:
             return head_pose
 
         if gaze_zone == head_pose:
-            return head_pose
+            ratio = self.classifier.eye_contribution_ratio(norm_x, norm_y, head_pose)
+            if ratio >= MIN_EYE_CONTRIBUTION_RATIO:
+                return head_pose
+            return "FORWARD"
 
         if self.classifier.is_at_forward_baseline(gaze_x, gaze_y):
             return "FORWARD"
 
         return head_pose
 
-    def update(self, head_pose, gaze_x=None, gaze_y=None):
+    def update(self, head_pose, gaze_x=None, gaze_y=None, norm_x=None, norm_y=None):
         if gaze_x is None or gaze_y is None:
             smoothed_x, smoothed_y = None, None
         else:
@@ -51,7 +56,7 @@ class ObservationEngine:
                 )
             smoothed_x, smoothed_y = self._smoothed_gaze
 
-        zone = self.estimate_zone(head_pose, smoothed_x, smoothed_y)
+        zone = self.estimate_zone(head_pose, smoothed_x, smoothed_y, norm_x, norm_y)
 
         if zone == self.last_zone:
             self.zone_counter += 1

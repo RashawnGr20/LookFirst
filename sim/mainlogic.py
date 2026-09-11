@@ -353,8 +353,14 @@ while running:
 
         pose = feedback.update(final_pitch, final_yaw, final_roll)
         world_x, world_y = gaze_zone_classifier.to_world_gaze(norm_x, norm_y, rel_yaw, rel_pitch)
-        observed_zone = observation_engine.update(pose, gaze_x=world_x, gaze_y=world_y)
-        print("[obs] head=", pose, "world_gaze=", (world_x, world_y), "zone=", observed_zone,
+        observed_zone = observation_engine.update(
+            pose,
+            gaze_x=world_x, gaze_y=world_y,
+            norm_x=norm_x, norm_y=norm_y,
+        )
+        eye_ratio = gaze_zone_classifier.eye_contribution_ratio(norm_x, norm_y, pose) if gaze_zone_classifier.has_anchor(pose) else None
+        print("[obs] head=", pose, "world_gaze=", (world_x, world_y),
+              "eye_ratio=", eye_ratio, "zone=", observed_zone,
               "held=", observation_engine.zone_counter)
         if recorder is not None:
             recorder.on_pose(pose, final_yaw, final_pitch, time.time())

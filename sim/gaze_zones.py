@@ -13,6 +13,8 @@ MIN_R_SQUARED = 0.4
 K_SANITY_RANGE = (0.005, 0.05)
 HEAD_SCALE_FRAMES = 150
 
+MIN_EYE_CONTRIBUTION_RATIO = 0.30
+
 
 @dataclass(frozen=True)
 class ZoneSpec:
@@ -196,6 +198,23 @@ class GazeZoneClassifier:
         if norm_x is None or norm_y is None or self._forward_baseline is None:
             return False
         return _distance((norm_x, norm_y), self._forward_baseline.gaze_xy) < self._forward_baseline.radius
+
+    def eye_contribution_ratio(self, norm_x, norm_y, zone_name):
+        if (norm_x is None or norm_y is None
+                or self._forward_baseline is None
+                or zone_name not in self._anchors):
+            return 0.0
+
+        bx, by = self._forward_baseline.gaze_xy
+        ax, ay = self._anchors[zone_name].gaze_xy
+
+        ox, oy = ax - bx, ay - by
+        denom = ox * ox + oy * oy
+        if denom < 1e-9:
+            return 0.0
+
+        dx, dy = norm_x - bx, norm_y - by
+        return (dx * ox + dy * oy) / denom
 
     def has_anchor(self, name):
         return name in self._anchors

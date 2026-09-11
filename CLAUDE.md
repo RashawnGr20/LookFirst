@@ -72,9 +72,12 @@ Pipeline for a tracked frame:
 3. `ObservationEngine` (`observation.py`) + `GazeZoneClassifier` (`gaze_zones.py`) fuse the
    confirmed head pose with per-user gaze evidence into an `observed_zone`. Head-only zones
    (`LEFT/RIGHT BLINDSPOT`) trust head pose. Gaze-anchored zones (`TOP MIRROR`, `LEFT MIRROR`,
-   `RIGHT MIRROR`, `LOOKING DOWN` in `ZONE_CATALOG`) require the classifier to agree — a head
-   turn with eyes at the forward baseline downgrades to `FORWARD`, catching the "looked
-   through the mirror" case. The engine also debounces its output over 5 frames independent of
+   `RIGHT MIRROR`, `LOOKING DOWN` in `ZONE_CATALOG`) require the classifier to agree AND the
+   iris to have moved meaningfully in the direction of the anchor (`eye_contribution_ratio`
+   ≥ `MIN_EYE_CONTRIBUTION_RATIO` = 0.30 of the baseline-to-anchor distance) — otherwise the
+   zone downgrades to `FORWARD`, catching the "head turned but eyes drifted with the head"
+   lazy-check case. A head turn with eyes at the strict forward baseline also downgrades to
+   `FORWARD`. The engine debounces its output over 5 frames independent of
    `feedBackEngine`'s pose debounce.
 4. `Scene` / `SequenceScene` / `coverageScene` (`scenes.py`) evaluate the `observed_zone`
    against a scenario's `expected_sequence`. Note the counter passed for the `min_glance` gate
