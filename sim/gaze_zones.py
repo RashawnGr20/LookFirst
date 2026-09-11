@@ -5,6 +5,14 @@ MIN_BASELINE_RADIUS = 0.15
 BASELINE_STDDEV_MULTIPLIER = 3.0
 BASELINE_ANCHOR_CAP_RATIO = 0.9
 
+DEFAULT_K_YAW = 0.02
+DEFAULT_K_PITCH = 0.02
+MIN_YAW_STDDEV_DEG = 3.0
+MIN_PITCH_STDDEV_DEG = 3.0
+MIN_R_SQUARED = 0.4
+K_SANITY_RANGE = (0.005, 0.05)
+HEAD_SCALE_FRAMES = 150
+
 
 @dataclass(frozen=True)
 class ZoneSpec:
@@ -55,6 +63,66 @@ class GazeZoneClassifier:
     def __init__(self):
         self._anchors = {}
         self._forward_baseline = None
+        self.k_yaw = DEFAULT_K_YAW
+        self.k_pitch = DEFAULT_K_PITCH
+
+    def to_world_gaze(self, norm_x, norm_y, rel_yaw, rel_pitch):
+        return (norm_x + self.k_yaw * rel_yaw,
+                norm_y + self.k_pitch * rel_pitch)
+
+    def calibrate_head_scale(self, samples):
+        if not samples:
+            print("[zones] head_scale fallback: no samples, keeping defaults")
+            return
+
+        n = len(samples)
+        mean_yaw = sum(s[2] for s in samples) / n
+        mean_pitch = sum(s[3] for s in samples) / n
+        yaw_var = sum((s[2] - mean_yaw) ** 2 for s in samples) / n
+        pitch_var = sum((s[3] - mean_pitch) ** 2 for s in samples) / n
+        yaw_stddev = math.sqrt(yaw_var)
+        pitch_stddev = math.sqrt(pitch_var)
+
+        self._fit_axis("k_yaw", samples, 0, 2, yaw_stddev, MIN_YAW_STDDEV_DEG)
+        self._fit_axis("k_pitch", samples, 1, 3, pitch_stddev, MIN_PITCH_STDDEV_DEG)
+
+        print("[zones] head_scale final k_yaw=", self.k_yaw, "k_pitch=", self.k_pitch)
+
+    def _fit_axis(self, field, samples, norm_index, head_index, head_stddev, min_head_stddev):
+        if head_stddev < min_head_stddev:
+            print("[zones] head_scale fallback:", field, "low head stddev",
+                  head_stddev, "<", min_head_stddev, "keeping", getattr(self, field))
+            return
+
+        numerator = -sum(s[norm_index] * s[head_index] for s in samples)
+        denominator = sum(s[head_index] ** 2 for s in samples)
+        if denominator <= 0:
+            print("[zones] head_scale fallback:", field, "zero denominator, keeping", getattr(self, field))
+            return
+
+        k_hat = numerator / denominator
+
+        predicted = [-k_hat * s[head_index] for s in samples]
+        actuals = [s[norm_index] for s in samples]
+        mean_actual = sum(actuals) / len(actuals)
+        ss_tot = sum((a - mean_actual) ** 2 for a in actuals)
+        ss_res = sum((a - p) ** 2 for a, p in zip(actuals, predicted))
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+        if r_squared < MIN_R_SQUARED:
+            print("[zones] head_scale fallback:", field, "R2", r_squared,
+                  "<", MIN_R_SQUARED, "keeping", getattr(self, field))
+            return
+
+        k_min, k_max = K_SANITY_RANGE
+        if not (k_min <= k_hat <= k_max):
+            print("[zones] head_scale fallback:", field, "k_hat", k_hat,
+                  "out of range", K_SANITY_RANGE, "keeping", getattr(self, field))
+            return
+
+        print("[zones] head_scale fit", field, "=", k_hat, "R2=", r_squared,
+              "head_stddev_deg=", head_stddev)
+        setattr(self, field, k_hat)
 
     def register_anchor(self, name, gaze_samples):
         if not gaze_samples:
@@ -135,3 +203,5 @@ class GazeZoneClassifier:
     def clear(self):
         self._anchors.clear()
         self._forward_baseline = None
+        self.k_yaw = DEFAULT_K_YAW
+        self.k_pitch = DEFAULT_K_PITCH

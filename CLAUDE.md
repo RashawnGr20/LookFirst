@@ -60,7 +60,11 @@ loop just calls `scene.update()` with no tracking args and releases the camera.
 Pipeline for a tracked frame:
 1. `HeadTracker` (`headtracking.py`) runs MediaPipe face mesh, smooths landmark positions, and
    derives pitch/yaw/roll (`pitch_vectors`) plus normalized iris/gaze offsets
-   (`normalized_gaze`) in head-relative (iris-in-eye-socket) coordinates.
+   (`normalized_gaze`) in head-relative (iris-in-eye-socket) coordinates. Before classification
+   the head-relative gaze is projected to *world-relative* via
+   `GazeZoneClassifier.to_world_gaze(norm_x, norm_y, rel_yaw, rel_pitch)`, which adds a
+   per-user `k_yaw × rel_yaw` term to `norm_x` and `k_pitch × rel_pitch` term to `norm_y`
+   (first-order additive model). Anchors and gaze both live in world-relative coords.
 2. `feedBackEngine.assign_pose()` (`feedback.py`) maps pitch/yaw onto a fixed set of pose
    labels (`FORWARD`, `LEFT MIRROR`, `LEFT BLINDSPOT`, `RIGHT MIRROR`, `RIGHT BLINDSPOT`,
    `TOP MIRROR`, `LOOKING DOWN`) via hardcoded degree thresholds, debounced by a `pose_counter`
@@ -82,7 +86,7 @@ Pipeline for a tracked frame:
    `update_<state>` method per state.
 
 Calibration (inside the `mainlogic.py` main loop, driven by `scene.state == "calibration"`)
-runs three sequential sub-phases, tracked with module-level state, not an object:
+runs four sequential sub-phases, tracked with module-level state, not an object:
 - **Head baseline**: buffer ~60 frames of pitch/yaw/roll while the user holds still facing
   forward (rejecting the buffer and restarting if yaw spread is too high) to compute
   `baseline_angles`. All subsequent pitch/yaw/roll are reported relative to this baseline
@@ -92,10 +96,16 @@ runs three sequential sub-phases, tracked with module-level state, not an object
   eye-openness changes) and the classifier's forward-gaze baseline (mean `(norm_x, norm_y)`
   when the user is head-forward-eyes-forward).
 - **Zone anchor walk (`zone_anchor`)**: iterates `ZONE_CATALOG`, showing a dot at each zone's
-  `screen_pos` and collecting ~30 samples of `(norm_x, norm_y)`. Each zone gets a per-user
+  `screen_pos` and collecting ~30 samples of `(world_x, world_y)`. Each zone gets a per-user
   anchor stored as a single point (no radius). After the last zone, `finalize_anchors()`
   caps the forward baseline's dead-zone radius so it can't swallow the nearest anchor, and
   emits a diagnostic dump of anchor positions and pairwise distances for future debugging.
+- **Head scale (`head_scale`)**: ~150 frames of "keep eyes on the center dot, slowly move
+  your head around." Exploits VOR (vestibulo-ocular reflex) — if the eyes stay on target,
+  every sample obeys `0 = norm + K × rel_head`. Two independent OLS regressions fit
+  `k_yaw` and `k_pitch` on the classifier; three quality checks (head stddev ≥ 3°,
+  R² ≥ 0.4, K in [0.005, 0.05]) gate the fit, otherwise the axis falls back to the
+  default 0.02 with a logged reason.
 
 `GazeZoneClassifier` uses a Voronoi model rather than per-anchor discs: `classify(x, y)`
 returns `None` when the gaze is inside the forward baseline's dead-zone (at rest), else the

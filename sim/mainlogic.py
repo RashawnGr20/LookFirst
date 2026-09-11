@@ -7,7 +7,7 @@ import mediapipe as mp
 from headtracking import HeadTracker
 from feedback import feedBackEngine
 from observation import ObservationEngine
-from gaze_zones import ZONE_CATALOG, GazeZoneClassifier
+from gaze_zones import ZONE_CATALOG, GazeZoneClassifier, HEAD_SCALE_FRAMES
 from scenegen import SceneGen, auth_client
 from scenes import Scene, Metrics
 from UI import UI
@@ -49,6 +49,7 @@ gaze_forward_buffer = []
 zone_anchor_index = 0
 zone_anchor_buffer = []
 ZONE_ANCHOR_FRAMES = 30
+head_scale_buffer = []
 
 gaze_zone_classifier = GazeZoneClassifier()
 observation_engine = ObservationEngine(gaze_zone_classifier)
@@ -116,6 +117,7 @@ while running:
         gaze_forward_buffer = []
         zone_anchor_index = 0
         zone_anchor_buffer = []
+        head_scale_buffer = []
         gaze_zone_classifier.clear()
         observation_engine.reset()
         
@@ -173,7 +175,16 @@ while running:
         yaw = vectors["yaw_angle"]
         roll = vectors["roll_angle"]
 
-        if scene.state == "calibration" : 
+        if baseline_angles is not None:
+            rel_pitch = angle_diff_deg(pitch, baseline_angles["pitch"])
+            rel_yaw = angle_diff_deg(yaw, baseline_angles["yaw"])
+            rel_roll = angle_diff_deg(roll, baseline_angles["roll"])
+        else:
+            rel_pitch = 0.0
+            rel_yaw = 0.0
+            rel_roll = 0.0
+
+        if scene.state == "calibration" :
             if baseline_angles is None:
                 baseline_buffer.append((pitch, yaw, roll))
 
@@ -254,9 +265,11 @@ while running:
                 
                 display_target = "center"
 
+                world_x, world_y = gaze_zone_classifier.to_world_gaze(norm_x, norm_y, rel_yaw, rel_pitch)
+
                 if gaze_phase == "center_ref" :
                     done = tracker.collect_gaze_ref("center_ref", left_height, right_height )
-                    gaze_forward_buffer.append((norm_x, norm_y))
+                    gaze_forward_buffer.append((world_x, world_y))
                     print("CENTER_REF COUNT", len(tracker.eye_height_buffer["left"]))
 
                     display_target = "center"
@@ -278,19 +291,18 @@ while running:
                                 zone_anchor_buffer = []
                             else :
                                 gaze_zone_classifier.finalize_anchors()
-                                gaze_calibrated = True
-                                scene.state = "simulation"
-                                scene.start_fade_in()
+                                gaze_phase = "head_scale"
+                                head_scale_buffer = []
 
                 elif gaze_phase == "zone_anchor" :
                     zone = ZONE_CATALOG[zone_anchor_index]
                     display_target = zone.name
 
-                    zone_anchor_buffer.append((norm_x, norm_y))
+                    zone_anchor_buffer.append((world_x, world_y))
 
                     zone_progress = (zone_anchor_index + len(zone_anchor_buffer) / ZONE_ANCHOR_FRAMES) / max(1, len(ZONE_CATALOG))
                     calibration_progress_data = {
-                        "progress": 0.75 + 0.25 * zone_progress,
+                        "progress": 0.75 + 0.2 * zone_progress,
                         "status_text": zone.calibration_prompt,
                     }
 
@@ -300,9 +312,25 @@ while running:
                         zone_anchor_index += 1
                         if zone_anchor_index >= len(ZONE_CATALOG) :
                             gaze_zone_classifier.finalize_anchors()
-                            gaze_calibrated = True
-                            scene.state = "simulation"
-                            scene.start_fade_in()
+                            gaze_phase = "head_scale"
+                            head_scale_buffer = []
+
+                elif gaze_phase == "head_scale" :
+                    display_target = "center"
+                    head_scale_buffer.append((norm_x, norm_y, rel_yaw, rel_pitch))
+
+                    hs_progress = len(head_scale_buffer) / HEAD_SCALE_FRAMES
+                    calibration_progress_data = {
+                        "progress": 0.95 + 0.05 * hs_progress,
+                        "status_text": "Keep your eyes on the dot and slowly move your head around",
+                    }
+
+                    if len(head_scale_buffer) >= HEAD_SCALE_FRAMES :
+                        gaze_zone_classifier.calibrate_head_scale(list(head_scale_buffer))
+                        head_scale_buffer = []
+                        gaze_calibrated = True
+                        scene.state = "simulation"
+                        scene.start_fade_in()
 
                 running = scene.update(0,0,0, "FORWARD", calibration_progress_data, display_target)
 
@@ -317,10 +345,6 @@ while running:
 
         norm_x, norm_y = tracker.normalized_gaze(face_landmarks)
 
-        rel_pitch = angle_diff_deg(pitch, baseline_angles["pitch"])
-        rel_yaw = angle_diff_deg(yaw, baseline_angles["yaw"])
-        rel_roll = angle_diff_deg(roll, baseline_angles["roll"])
-
         final_pitch, final_yaw, final_roll = rel_pitch, rel_yaw, rel_roll
 
         final_pitch = apply_deadzone(final_pitch, DEADZONE_PITCH)
@@ -328,8 +352,9 @@ while running:
         final_roll = apply_deadzone(final_roll, DEADZONE_ROLL)
 
         pose = feedback.update(final_pitch, final_yaw, final_roll)
-        observed_zone = observation_engine.update(pose, gaze_x=norm_x, gaze_y=norm_y)
-        print("[obs] head=", pose, "gaze=", (norm_x, norm_y), "zone=", observed_zone,
+        world_x, world_y = gaze_zone_classifier.to_world_gaze(norm_x, norm_y, rel_yaw, rel_pitch)
+        observed_zone = observation_engine.update(pose, gaze_x=world_x, gaze_y=world_y)
+        print("[obs] head=", pose, "world_gaze=", (world_x, world_y), "zone=", observed_zone,
               "held=", observation_engine.zone_counter)
         if recorder is not None:
             recorder.on_pose(pose, final_yaw, final_pitch, time.time())
