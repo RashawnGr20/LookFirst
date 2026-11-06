@@ -6,7 +6,7 @@ A driver's-test prep tool that uses your webcam to check whether you actually lo
 
 LookFirst tracks your head pose and eye gaze with MediaPipe and works out which part of the driving scene you are looking at: forward, left/right mirror, left/right blind spot, top (rear-view) mirror, or down. It plays you through a panoramic driving scenario and scores whether you made the required observation checks, and in the right order where order matters.
 
-- **Head + gaze fusion:** head turns alone don't count for mirror checks. Your eyes have to move too! 
+- **Head + gaze fusion:** head turns alone don't count for mirror checks. Your eyes have to move too.
 - **Per-user calibration:** a short guided routine (look forward, look at each zone, move your head while holding your gaze) fits the tracking to your face and camera.
 - **Scenarios:** *Left Lane Change* (ordered sequence of checks) and *Four-Way Left Turn* (coverage of the intersection).
 - **Results:** an overall score with the checks you completed and the ones you missed.
