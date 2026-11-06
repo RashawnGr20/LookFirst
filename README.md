@@ -10,7 +10,7 @@ LookFirst tracks your head pose and eye gaze with MediaPipe and works out which 
 - **Per-user calibration:** a short guided routine (look forward, look at each zone, move your head while holding your gaze) fits the tracking to your face and camera.
 - **Scenarios:** *Left Lane Change* (ordered sequence of checks) and *Four-Way Left Turn* (coverage of the intersection).
 - **Results:** an overall score with the checks you completed and the ones you missed.
-- **Accounts (optional):** a FastAPI + Postgres backend stores accounts and session history.Also giving access to the AI coaching layer. Without it, use guest mode.
+- **Accounts (optional):** a FastAPI + Postgres backend stores accounts and session history and also gives access to the AI coaching layer. Without it, use guest mode.
 
 ## Screenshots
 
